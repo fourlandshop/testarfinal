@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Camera</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.8.0/opencv.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: black;
+        }
+        
+        video {
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+        }
+        
+        #targetVideo {
+            position: absolute;
+            pointer-events: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <video id="camera" autoplay playsinline></video>
+    <canvas id="overlay"></canvas>
+    <video id="targetVideo" src="./video.mp4" loop muted playsinline></video>
+    
+    <script>
+        const video = document.getElementById('camera');
+        const canvas = document.getElementById('overlay');
+        const ctx = canvas.getContext('2d');
+        const targetVideo = document.getElementById('targetVideo');
+        
+        let targetImage = new Image();
+        let isTracking = false;
+        
+        // Load target image
+        targetImage.src = './marker.jpg'; // عکس مارکر شما
+        
+        navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            }
+        })
+        .then(stream => {
+            video.srcObject = stream;
+            
+            video.addEventListener('loadedmetadata', () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                // شروع تشخیص
+                requestAnimationFrame(detectMarker);
+            });
+        })
+        .catch(err => {
+            console.error('Error:', err);
+        });
+        
+        function detectMarker() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                // رسم فریم فعلی روی canvas برای پردازش
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // شبیه‌سازی تشخیص ساده - در واقع باید الگوریتم تشخیص تصویر باشه
+                // برای تست، اگه وسط صفحه کلیک شد فیلم پخش میشه
+                
+                if (isTracking) {
+                    // نمایش فیلم در موقعیت تشخیص شده
+                    showVideoAtPosition(canvas.width/2, canvas.height/2, 300, 200);
+                }
+            }
+            
+            requestAnimationFrame(detectMarker);
+        }
+        
+        function showVideoAtPosition(x, y, width, height) {
+            targetVideo.style.display = 'block';
+            targetVideo.style.left = (x - width/2) + 'px';
+            targetVideo.style.top = (y - height/2) + 'px';
+            targetVideo.style.width = width + 'px';
+            targetVideo.style.height = height + 'px';
+            
+            if (targetVideo.paused) {
+                targetVideo.play().catch(e => console.log('Video play error:', e));
+            }
+        }
+        
+        // برای تست - کلیک روی صفحه فیلم رو فعال می‌کنه
+        canvas.addEventListener('click', (e) => {
+            isTracking = !isTracking;
+            
+            if (!isTracking) {
+                targetVideo.style.display = 'none';
+                targetVideo.pause();
+            }
+        });
+        
+        // تنظیم سایز canvas هنگام تغییر اندازه صفحه
+        window.addEventListener('resize', () => {
+            if (video.videoWidth && video.videoHeight) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+            }
+        });
+    </script>
+</body>
+</html>
