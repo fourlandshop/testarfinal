@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Camera</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsfeat/0.0.8/jsfeat.min.js"></script>
+    <title>QR AR Video</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qr-scanner/1.4.2/qr-scanner.umd.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -24,208 +24,123 @@
             pointer-events: none;
             display: none;
             z-index: 10;
-        }
-        
-        #debugInfo {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            font-size: 12px;
-            background: rgba(0,0,0,0.7);
-            padding: 5px;
-            border-radius: 3px;
-            z-index: 20;
+            border: 3px solid #00ff00;
+            border-radius: 10px;
         }
     </style>
 </head>
 <body>
     <video id="camera" autoplay playsinline></video>
     <video id="targetVideo" src="./video.mp4" loop muted playsinline></video>
-    <div id="debugInfo">جستجوی مارکر...</div>
     
     <script>
         const video = document.getElementById('camera');
         const targetVideo = document.getElementById('targetVideo');
-        const debugInfo = document.getElementById('debugInfo');
-        
-        let canvas, ctx;
-        let targetImage = new Image();
-        let isProcessing = false;
-        let frameCount = 0;
-        
-        // بارگذاری عکس مارکر
-        targetImage.crossOrigin = "anonymous";
-        targetImage.src = './marker.jpg';
-        
-        targetImage.onload = () => {
-            console.log('Marker loaded');
-            debugInfo.textContent = 'مارکر بارگذاری شد';
-        };
-        
-        targetImage.onerror = () => {
-            debugInfo.textContent = 'خطا در بارگذاری مارکر';
-        };
+        let qrScanner;
+        let isVideoPlaying = false;
         
         // شروع دوربین
         navigator.mediaDevices.getUserMedia({
             video: {
-                facingMode: 'environment',
-                width: { ideal: 640 },  // کیفیت کمتر برای سرعت بیشتر
-                height: { ideal: 480 }
+                facingMode: 'environment'
             }
         })
         .then(stream => {
             video.srcObject = stream;
             
             video.addEventListener('loadedmetadata', () => {
-                // ایجاد canvas مخفی برای پردازش
-                canvas = document.createElement('canvas');
-                canvas.width = 320; // سایز کوچک برای پردازش سریع
-                canvas.height = 240;
-                ctx = canvas.getContext('2d');
+                // شروع QR Scanner
+                qrScanner = new QrScanner(
+                    video,
+                    result => handleQRDetected(result),
+                    {
+                        returnDetailedScanResult: true,
+                        highlightScanRegion: false,
+                        highlightCodeOutline: false
+                    }
+                );
                 
-                // شروع پردازش
-                processFrame();
+                qrScanner.start().then(() => {
+                    console.log('QR Scanner started');
+                });
             });
         })
         .catch(err => {
-            debugInfo.textContent = 'خطا در دوربین: ' + err.message;
+            console.error('Camera error:', err);
         });
         
-        function processFrame() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA && !isProcessing) {
-                frameCount++;
+        function handleQRDetected(result) {
+            // اگه QR کد "AR_VIDEO" باشه، فیلم پخش کن
+            if (result.data === "AR_VIDEO") {
+                const corner = result.cornerPoints;
                 
-                // فقط هر 5 فریم یکبار پردازش کن (برای سرعت)
-                if (frameCount % 5 === 0) {
-                    detectMarker();
-                }
-            }
-            
-            requestAnimationFrame(processFrame);
-        }
-        
-        function detectMarker() {
-            if (!targetImage.complete) return;
-            
-            isProcessing = true;
-            
-            // رسم فریم کوچک برای پردازش
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // جستجوی ساده با تطبیق رنگ
-            const match = findColorMatch();
-            
-            if (match) {
-                debugInfo.textContent = `مارکر پیدا شد! اعتماد: ${match.confidence.toFixed(2)}`;
-                showVideoAtPosition(match.x, match.y, match.size);
-            } else {
-                debugInfo.textContent = 'در جستجوی مارکر...';
-                hideVideo();
-            }
-            
-            isProcessing = false;
-        }
-        
-        function findColorMatch() {
-            // تحلیل رنگ‌های غالب عکس مارکر (ساده‌سازی)
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            
-            let bestMatch = null;
-            let maxScore = 0;
-            
-            // جستجو در بلوک‌های 40x40 پیکسلی
-            const blockSize = 40;
-            
-            for (let y = 0; y < canvas.height - blockSize; y += 20) {
-                for (let x = 0; x < canvas.width - blockSize; x += 20) {
-                    const score = analyzeBlock(data, x, y, blockSize, canvas.width);
+                if (corner && corner.length >= 4) {
+                    // محاسبه مرکز و سایز QR کد
+                    const centerX = (corner[0].x + corner[2].x) / 2;
+                    const centerY = (corner[0].y + corner[2].y) / 2;
                     
-                    if (score > maxScore && score > 0.3) {
-                        maxScore = score;
-                        bestMatch = {
-                            x: (x + blockSize/2) * (window.innerWidth / canvas.width),
-                            y: (y + blockSize/2) * (window.innerHeight / canvas.height),
-                            size: blockSize * 4,
-                            confidence: score
-                        };
-                    }
+                    const width = Math.abs(corner[2].x - corner[0].x);
+                    const height = Math.abs(corner[2].y - corner[0].y);
+                    
+                    // نمایش فیلم روی QR کد
+                    showVideoAtPosition(centerX, centerY, width * 1.2, height * 1.2);
                 }
             }
-            
-            return bestMatch;
         }
         
-        function analyzeBlock(data, startX, startY, blockSize, canvasWidth) {
-            let r = 0, g = 0, b = 0, pixels = 0;
-            let variance = 0;
+        function showVideoAtPosition(x, y, width, height) {
+            // تبدیل مختصات به pixel واقعی صفحه
+            const scaleX = window.innerWidth / video.videoWidth;
+            const scaleY = window.innerHeight / video.videoHeight;
             
-            // محاسبه میانگین رنگ در بلوک
-            for (let y = startY; y < startY + blockSize; y++) {
-                for (let x = startX; x < startX + blockSize; x++) {
-                    const i = (y * canvasWidth + x) * 4;
-                    r += data[i];
-                    g += data[i + 1];
-                    b += data[i + 2];
-                    pixels++;
-                }
-            }
+            const screenX = x * scaleX;
+            const screenY = y * scaleY;
+            const screenWidth = width * scaleX;
+            const screenHeight = height * scaleY;
             
-            if (pixels === 0) return 0;
-            
-            r /= pixels;
-            g /= pixels;
-            b /= pixels;
-            
-            // محاسبه واریانس (برای تشخیص نواحی با جزئیات)
-            for (let y = startY; y < startY + blockSize; y++) {
-                for (let x = startX; x < startX + blockSize; x++) {
-                    const i = (y * canvasWidth + x) * 4;
-                    const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                    const avgGray = (r + g + b) / 3;
-                    variance += Math.pow(gray - avgGray, 2);
-                }
-            }
-            
-            variance /= pixels;
-            
-            // امتیازدهی: واریانس بالا + کنتراست مناسب = احتمال وجود مارکر
-            const contrastScore = Math.min(variance / 1000, 1);
-            const brightnessScore = 1 - Math.abs((r + g + b) / 3 - 128) / 128;
-            
-            return (contrastScore * 0.7 + brightnessScore * 0.3);
-        }
-        
-        function showVideoAtPosition(x, y, size) {
             targetVideo.style.display = 'block';
-            targetVideo.style.left = (x - size/2) + 'px';
-            targetVideo.style.top = (y - size/2) + 'px';
-            targetVideo.style.width = size + 'px';
-            targetVideo.style.height = (size * 0.75) + 'px';
+            targetVideo.style.left = (screenX - screenWidth/2) + 'px';
+            targetVideo.style.top = (screenY - screenHeight/2) + 'px';
+            targetVideo.style.width = screenWidth + 'px';
+            targetVideo.style.height = screenHeight + 'px';
             
-            if (targetVideo.paused) {
-                targetVideo.play().catch(e => {
-                    console.log('Video autoplay blocked');
+            if (!isVideoPlaying) {
+                targetVideo.play().then(() => {
+                    isVideoPlaying = true;
+                }).catch(e => {
+                    console.log('Video play blocked, click to play');
                 });
             }
         }
         
-        function hideVideo() {
-            targetVideo.style.display = 'none';
-            if (!targetVideo.paused) {
-                targetVideo.pause();
-            }
-        }
+        // مخفی کردن فیلم اگه QR پیدا نشد (با تاخیر)
+        let hideTimeout;
+        qrScanner && qrScanner.setGrayscaleWeights && setInterval(() => {
+            clearTimeout(hideTimeout);
+            hideTimeout = setTimeout(() => {
+                targetVideo.style.display = 'none';
+                if (isVideoPlaying) {
+                    targetVideo.pause();
+                    isVideoPlaying = false;
+                }
+            }, 500);
+        }, 100);
         
-        // کلیک برای شروع پخش (در صورت block شدن autoplay)
+        // کلیک برای شروع پخش
         document.addEventListener('click', () => {
             if (targetVideo.style.display === 'block' && targetVideo.paused) {
-                targetVideo.play();
+                targetVideo.play().then(() => {
+                    isVideoPlaying = true;
+                });
             }
-        }, { once: true });
+        });
         
+        // تمیز کردن منابع
+        window.addEventListener('beforeunload', () => {
+            if (qrScanner) {
+                qrScanner.destroy();
+            }
+        });
     </script>
 </body>
 </html>
