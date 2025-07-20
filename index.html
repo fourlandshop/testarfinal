@@ -75,20 +75,87 @@
         });
         
         function detectMarker() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            if (video.readyState === video.HAVE_ENOUGH_DATA && targetImage.complete) {
                 // رسم فریم فعلی روی canvas برای پردازش
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                // شبیه‌سازی تشخیص ساده - در واقع باید الگوریتم تشخیص تصویر باشه
-                // برای تست، اگه وسط صفحه کلیک شد فیلم پخش میشه
+                // تشخیص عکس با template matching
+                const match = findTemplate();
                 
-                if (isTracking) {
+                if (match && match.confidence > 0.7) {
+                    isTracking = true;
                     // نمایش فیلم در موقعیت تشخیص شده
-                    showVideoAtPosition(canvas.width/2, canvas.height/2, 300, 200);
+                    showVideoAtPosition(match.x, match.y, match.width, match.height);
+                } else {
+                    isTracking = false;
+                    targetVideo.style.display = 'none';
+                    targetVideo.pause();
                 }
             }
             
             requestAnimationFrame(detectMarker);
+        }
+        
+        function findTemplate() {
+            if (!targetImage.complete) return null;
+            
+            // تبدیل تصاویر به grayscale برای مقایسه سریع‌تر
+            const cameraImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            // ایجاد canvas موقت برای عکس مارکر
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = 200; // سایز ثابت برای جستجو
+            tempCanvas.height = 150;
+            
+            tempCtx.drawImage(targetImage, 0, 0, tempCanvas.width, tempCanvas.height);
+            const templateImageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            
+            let bestMatch = null;
+            let maxCorrelation = 0;
+            
+            // جستجو در قسمت‌های مختلف تصویر دوربین
+            const stepSize = 20; // گام جستجو
+            
+            for (let y = 0; y < canvas.height - tempCanvas.height; y += stepSize) {
+                for (let x = 0; x < canvas.width - tempCanvas.width; x += stepSize) {
+                    
+                    const roi = ctx.getImageData(x, y, tempCanvas.width, tempCanvas.height);
+                    const correlation = calculateCorrelation(roi, templateImageData);
+                    
+                    if (correlation > maxCorrelation) {
+                        maxCorrelation = correlation;
+                        bestMatch = {
+                            x: x + tempCanvas.width / 2,
+                            y: y + tempCanvas.height / 2,
+                            width: tempCanvas.width,
+                            height: tempCanvas.height,
+                            confidence: correlation
+                        };
+                    }
+                }
+            }
+            
+            return bestMatch;
+        }
+        
+        function calculateCorrelation(img1, img2) {
+            if (img1.data.length !== img2.data.length) return 0;
+            
+            let sum = 0;
+            let count = 0;
+            
+            // مقایسه مقادیر RGB
+            for (let i = 0; i < img1.data.length; i += 4) {
+                const gray1 = (img1.data[i] + img1.data[i + 1] + img1.data[i + 2]) / 3;
+                const gray2 = (img2.data[i] + img2.data[i + 1] + img2.data[i + 2]) / 3;
+                
+                const diff = Math.abs(gray1 - gray2);
+                sum += (255 - diff) / 255;
+                count++;
+            }
+            
+            return count > 0 ? sum / count : 0;
         }
         
         function showVideoAtPosition(x, y, width, height) {
@@ -103,14 +170,13 @@
             }
         }
         
-        // برای تست - کلیک روی صفحه فیلم رو فعال می‌کنه
-        canvas.addEventListener('click', (e) => {
-            isTracking = !isTracking;
-            
-            if (!isTracking) {
-                targetVideo.style.display = 'none';
-                targetVideo.pause();
-            }
+        // بارگذاری عکس مارکر
+        targetImage.addEventListener('load', () => {
+            console.log('Marker image loaded successfully');
+        });
+        
+        targetImage.addEventListener('error', () => {
+            console.error('Could not load marker image');
         });
         
         // تنظیم سایز canvas هنگام تغییر اندازه صفحه
